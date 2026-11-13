@@ -18,21 +18,12 @@ const { yaml } = SillyTavern.libs;
 const fetchOriginal = globalThis.fetch.bind(globalThis);
 const profileKey = (source, model) => JSON.stringify([source, model]);
 
-let bodySupport;
-function supportsNativeBodyOverrides() {
-    bodySupport ??= fetchOriginal(`${chatPath}/custom-body-support`, { cache: 'no-store' })
-        .then(async response => response.ok && (await response.json()).version === 1)
-        .catch(() => false);
-    return bodySupport;
-}
-
 function modelSettings(source, model) {
     const settings = context.extensionSettings[extensionId];
     return settings?.[profileKey(source, model)] ?? settings?.[profileKey(source, `models/${model}`)];
 }
 
 async function openParameters(source, model) {
-    const nativeBody = await supportsNativeBodyOverrides();
     const content = document.createElement('div');
     content.className = 'flex-container flexFlowColumn';
     const title = document.createElement('h3');
@@ -61,12 +52,6 @@ async function openParameters(source, model) {
     hint.textContent = 'Формат YAML или JSON. В списке исключений используйте пути через точку.';
     content.append(hint);
 
-    const support = document.createElement('small');
-    support.textContent = nativeBody
-        ? 'Параметры передаются через сохранённое подключение SillyTavern.'
-        : 'Этот сервер передаёт только штатные параметры Gemini, например maxOutputTokens и temperature. Для XHIGH серверу нужна поддержка дополнительных полей Gemini.';
-    content.append(support);
-
     const headersLabel = document.createElement('label');
     const headers = document.createElement('textarea');
     headers.className = 'text_pole textarea_compact';
@@ -83,7 +68,7 @@ async function openParameters(source, model) {
         content.append(oldHeaders);
     }
 
-    if (model === hydrogenModel && nativeBody) {
+    if (model === hydrogenModel) {
         const example = document.createElement('button');
         example.type = 'button';
         example.className = 'menu_button';
@@ -115,7 +100,7 @@ async function openParameters(source, model) {
             try {
                 const parameters = parseParameters(values, yaml.parse);
                 hasValues = Object.keys(parameters.include).length > 0 || parameters.excludePaths.length > 0;
-                if (hasValues) prepareGeminiRequest({ model }, parameters, nativeBody);
+                if (hasValues) prepareGeminiRequest({ model }, parameters);
             } catch (error) {
                 status.textContent = error.message;
                 status.hidden = false;
@@ -185,15 +170,13 @@ globalThis.fetch = function fetchWithGeminiParameters(resource, options) {
     const settings = modelSettings(source, payload.model.replace(/^models\//, ''));
     if (!settings) return fetchOriginal(resource, options);
 
-    return supportsNativeBodyOverrides().then(nativeBody => {
-        let body;
-        try {
-            const parameters = parseParameters(settings, yaml.parse);
-            if (!Object.keys(parameters.include).length && !parameters.excludePaths.length) return fetchOriginal(resource, options);
-            body = JSON.stringify(prepareGeminiRequest(payload, parameters, nativeBody));
-        } catch (error) {
-            return Response.json({ error: { message: error.message } }, { status: 400 });
-        }
-        return fetchOriginal(resource, { ...options, body });
-    });
+    let body;
+    try {
+        const parameters = parseParameters(settings, yaml.parse);
+        if (!Object.keys(parameters.include).length && !parameters.excludePaths.length) return fetchOriginal(resource, options);
+        body = JSON.stringify(prepareGeminiRequest(payload, parameters));
+    } catch (error) {
+        return Promise.resolve(Response.json({ error: { message: error.message } }, { status: 400 }));
+    }
+    return fetchOriginal(resource, { ...options, body });
 };

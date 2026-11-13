@@ -10,12 +10,12 @@
 https://github.com/tankisthuieglot-hue/sillytavern-gemini-parameters.git
 ```
 
-Версия 1.2 использует выбранное подключение Google AI Studio или Vertex AI и его сохранённые данные доступа. Для установки достаточно меню SillyTavern.
+Расширение использует выбранное подключение Google AI Studio или Vertex AI и его сохранённые данные доступа. Для установки достаточно меню SillyTavern.
 
 ## Gemini 4 Hydrogen с XHIGH
 
 1. В **«Подключения API»** выберите **Chat Completion**, затем **Google AI Studio** или **Google Vertex AI**. Выберите `gemini-4-hydrogen`.
-2. Нажмите **«Доп. параметры» → «Подставить пример Hydrogen XHIGH» → «Сохранить»**. Кнопка примера доступна, когда установленная сборка SillyTavern умеет передавать дополнительные поля в нативный запрос Google.
+2. Нажмите **«Доп. параметры» → «Подставить пример Hydrogen XHIGH» → «Сохранить»**.
 3. Для вывода рассуждений включите **«Запрашивать рассуждения»** в настройках ответа ИИ. [Рассуждения в SillyTavern](https://docs.sillytavern.app/usage/prompts/reasoning/)
 
 Кнопка заполнит поле **«Добавить в тело запроса»**:
@@ -41,6 +41,6 @@ generationConfig:
 
 Расширение добавляет параметры к штатному запросу SillyTavern. Сервер SillyTavern сам применяет ключ, проект Vertex, регион и способ авторизации из выбранного подключения.
 
-Поддержка произвольных полей определяется по `/api/backends/chat-completions/custom-body-support`. Если такой поддержки нет, доступны поля, которые сервер уже принимает, например `generationConfig.maxOutputTokens`. При попытке отправить `XHIGH` на такой сборке расширение показывает ошибку с именем поля.
+Расширение прикладывает `custom_request_body` к запросу Studio или Vertex при каждой генерации с сохранёнными параметрами. Сборки SillyTavern, которые читают `custom_request_body`, передают эти поля в Google. Остальные сборки используют штатные параметры, например `maxOutputTokens`, и игнорируют дополнительные поля вроде `thinkingConfig`.
 
 Доступность модели определяется Google. Для Hydrogen в стандартном Vertex AI доступны `global`, `us` и `eu`. [Доступность Gemini 4 Hydrogen](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/4-hydrogen)
