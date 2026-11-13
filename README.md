@@ -16,7 +16,7 @@ https://github.com/tankisthuieglot-hue/sillytavern-gemini-parameters.git
 
 1. В **«Подключения API»** выберите **Chat Completion**, затем **Google AI Studio** или **Google Vertex AI**. Выберите `gemini-4-hydrogen`.
 2. Нажмите **«Доп. параметры» → «Подставить пример Hydrogen XHIGH» → «Сохранить»**.
-3. Для вывода рассуждений включите **«Запрашивать рассуждения»** в настройках ответа ИИ. [Рассуждения в SillyTavern](https://docs.sillytavern.app/usage/prompts/reasoning/)
+3. При сохранении `includeThoughts: true` расширение включает **«Запрашивать рассуждения»** в настройках ответа ИИ. Если Google вернёт сводку рассуждений, откройте её под сообщением. [Рассуждения в SillyTavern](https://docs.sillytavern.app/usage/prompts/reasoning/)
 
 Кнопка заполнит поле **«Добавить в тело запроса»**:
 
@@ -28,6 +28,8 @@ generationConfig:
 ```
 
 `thinkingBudget` вызывает ошибку у Hydrogen, а `temperature`, `topP` и `topK` модель игнорирует. Google учитывает размышления и текст ответа в одном лимите выходных токенов. [Схема Google AI Studio GenerateContent](https://aistudio.google.com/api-reference/generate-content), [руководство Google Cloud по Hydrogen](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-hydrogen)
+
+После генерации снова откройте **«Доп. параметры»**. Окно показывает `thinkingLevel` и `includeThoughts` в последнем запросе к SillyTavern для выбранной модели, состояние показа рассуждений на момент отправки и наличие сводки в ответе. Поддержка сервером дополнительных полей проверяется отдельно. Наличие сводки само по себе не подтверждает, какой уровень рассуждений применил Google.
 
 ## Свои параметры
 

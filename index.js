@@ -17,10 +17,72 @@ const context = SillyTavern.getContext();
 const { yaml } = SillyTavern.libs;
 const fetchOriginal = globalThis.fetch.bind(globalThis);
 const profileKey = (source, model) => JSON.stringify([source, model]);
+const lastRequests = new Map();
 
 function modelSettings(source, model) {
     const settings = context.extensionSettings[extensionId];
     return settings?.[profileKey(source, model)] ?? settings?.[profileKey(source, `models/${model}`)];
+}
+
+async function reportServerSupport(status) {
+    try {
+        const response = await fetchOriginal(`${chatPath}/custom-body-support`, { cache: 'no-store' });
+        if (response.ok && (await response.json())?.version === 1) {
+            status.textContent = 'Сервер поддерживает передачу дополнительных полей в Google.';
+            return;
+        }
+    } catch {
+        // Older and independently modified servers can lack this endpoint.
+    }
+    status.textContent = 'Передача в Google не подтверждена. Сервер не сообщил о поддержке дополнительных полей.';
+}
+
+function hasThoughtSummary(data) {
+    const parts = data?.responseContent?.parts ?? data?.candidates?.[0]?.content?.parts;
+    return Array.isArray(parts) && parts.some(part => part?.thought === true && typeof part.text === 'string' && part.text.trim());
+}
+
+async function responseSummary(response, stream) {
+    if (!response.ok) return `Сервер вернул HTTP ${response.status}.`;
+    if (!stream) {
+        const data = await response.json();
+        if (data?.error) return 'Сервер вернул ошибку генерации.';
+        return hasThoughtSummary(data) ? 'В ответе есть сводка рассуждений.' : 'Ответ без сводки рассуждений.';
+    }
+
+    const { default: EventSourceStream } = await import('/scripts/sse-stream.js');
+    const reader = response.body.pipeThrough(new EventSourceStream()).getReader();
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done || value.data === '[DONE]') return 'Ответ без сводки рассуждений.';
+            const data = JSON.parse(value.data);
+            if (data?.error) return 'Сервер вернул ошибку генерации.';
+            if (hasThoughtSummary(data)) return 'В ответе есть сводка рассуждений.';
+        }
+    } finally {
+        void reader.cancel().catch(() => {});
+    }
+}
+
+function observeRequest(request, source, model, config, stream) {
+    const level = typeof config?.thinkingLevel === 'string' ? config.thinkingLevel : 'отсутствует';
+    const includeThoughts = typeof config?.includeThoughts === 'boolean' ? config.includeThoughts : 'отсутствует';
+    const display = context.chatCompletionSettings.show_thoughts ? 'включён' : 'выключен';
+    // Leave the original response and its stream available to SillyTavern.
+    const summary = request.then(async response => {
+        const copy = response.clone();
+        try {
+            return await responseSummary(copy, stream);
+        } finally {
+            if (!copy.bodyUsed) void copy.body?.cancel().catch(() => {});
+        }
+    }, () => 'Не удалось связаться с сервером SillyTavern.').catch(() => 'Не удалось проверить наличие сводки в ответе.');
+    lastRequests.set(profileKey(source, model), {
+        sent: `Запрос к SillyTavern · thinkingLevel: ${level} · includeThoughts: ${includeThoughts}`,
+        display: `Показ рассуждений в чате при отправке: ${display}.`,
+        summary,
+    });
 }
 
 async function openParameters(source, model) {
@@ -31,6 +93,23 @@ async function openParameters(source, model) {
     const description = document.createElement('small');
     description.textContent = `${providers[source].label} · ${model}`;
     content.append(title, description);
+
+    const serverStatus = document.createElement('small');
+    content.append(serverStatus);
+    void reportServerSupport(serverStatus);
+
+    const record = lastRequests.get(profileKey(source, model));
+    const requestStatus = document.createElement('small');
+    requestStatus.textContent = record?.sent ?? 'Расширение пока не зафиксировало запрос к этой модели.';
+    content.append(requestStatus);
+    if (record) {
+        const displayStatus = document.createElement('small');
+        displayStatus.textContent = record.display;
+        const responseStatus = document.createElement('small');
+        responseStatus.textContent = 'Ожидание ответа.';
+        content.append(displayStatus, responseStatus);
+        void record.summary.then(result => { responseStatus.textContent = result; });
+    }
 
     const saved = modelSettings(source, model) ?? {};
     const inputs = {};
@@ -97,10 +176,14 @@ async function openParameters(source, model) {
             const values = Object.fromEntries(Object.entries(inputs).map(([name, input]) => [name, input.value]));
             const hasSavedHeaders = typeof saved.headers === 'string' && Boolean(saved.headers.trim());
             let hasValues;
+            let includeThoughts;
             try {
                 const parameters = parseParameters(values, yaml.parse);
                 hasValues = Object.keys(parameters.include).length > 0 || parameters.excludePaths.length > 0;
-                if (hasValues) prepareGeminiRequest({ model }, parameters);
+                if (hasValues) {
+                    const prepared = prepareGeminiRequest({ model }, parameters);
+                    includeThoughts = prepared.custom_request_body?.generationConfig?.thinkingConfig?.includeThoughts === true;
+                }
             } catch (error) {
                 status.textContent = error.message;
                 status.hidden = false;
@@ -112,6 +195,15 @@ async function openParameters(source, model) {
             if (hasValues || hasSavedHeaders) settings[key] = { ...values, ...(hasSavedHeaders ? { headers: saved.headers } : {}) };
             else delete settings[key];
             delete settings[profileKey(source, `models/${model}`)];
+
+            if (includeThoughts && !context.chatCompletionSettings.show_thoughts) {
+                const checkbox = document.querySelector('#openai_show_thoughts');
+                if (checkbox) {
+                    checkbox.checked = true;
+                    checkbox.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                context.chatCompletionSettings.show_thoughts = true;
+            }
             context.saveSettingsDebounced();
             return true;
         },
@@ -167,16 +259,25 @@ globalThis.fetch = function fetchWithGeminiParameters(resource, options) {
     }
     const source = payload?.chat_completion_source;
     if (!Object.hasOwn(providers, source) || typeof payload.model !== 'string') return fetchOriginal(resource, options);
-    const settings = modelSettings(source, payload.model.replace(/^models\//, ''));
-    if (!settings) return fetchOriginal(resource, options);
+    const model = payload.model.replace(/^models\//, '');
+    const settings = modelSettings(source, model);
 
-    let body;
+    let prepared = payload;
     try {
-        const parameters = parseParameters(settings, yaml.parse);
-        if (!Object.keys(parameters.include).length && !parameters.excludePaths.length) return fetchOriginal(resource, options);
-        body = JSON.stringify(prepareGeminiRequest(payload, parameters));
+        if (settings) {
+            const parameters = parseParameters(settings, yaml.parse);
+            if (Object.keys(parameters.include).length || parameters.excludePaths.length) {
+                prepared = prepareGeminiRequest(payload, parameters);
+                options = { ...options, body: JSON.stringify(prepared) };
+            }
+        }
     } catch (error) {
         return Promise.resolve(Response.json({ error: { message: error.message } }, { status: 400 }));
     }
-    return fetchOriginal(resource, { ...options, body });
+    const request = fetchOriginal(resource, options);
+    if (settings || /^gemini-4(?:[.-]|$)/i.test(model)) {
+        const config = prepared.custom_request_body?.generationConfig?.thinkingConfig;
+        observeRequest(request, source, model, config, Boolean(payload.stream));
+    }
+    return request;
 };
