@@ -83,21 +83,7 @@ function canOmit(path, model) {
     return optionalFields.has(path) || (path === 'generationConfig.thinkingConfig.thinkingBudget' && hydrogen.test(model));
 }
 
-function firstUnknownField(body, prefix = '') {
-    for (const [key, value] of Object.entries(body)) {
-        const path = prefix ? `${prefix}.${key}` : key;
-        if (inputFields.has(path)) continue;
-        if (path === 'generationConfig' && isObject(value)) {
-            const unknown = firstUnknownField(value, path);
-            if (unknown) return unknown;
-        } else {
-            return path;
-        }
-    }
-    return '';
-}
-
-export function prepareGeminiRequest(payload, parameters, nativeBody) {
+export function prepareGeminiRequest(payload, parameters) {
     const output = { ...payload };
     const model = String(payload.model ?? '').replace(/^models\//, '');
     const existing = payload.custom_request_body;
@@ -106,7 +92,7 @@ export function prepareGeminiRequest(payload, parameters, nativeBody) {
         validateObject(existing);
     }
 
-    const defaultThinking = nativeBody && gemini4.test(model) && payload.include_reasoning
+    const defaultThinking = gemini4.test(model) && payload.include_reasoning
         ? { generationConfig: { thinkingConfig: { includeThoughts: true } } } : {};
     const overrides = merge(merge(defaultThinking, existing ?? {}), parameters.include);
 
@@ -123,19 +109,13 @@ export function prepareGeminiRequest(payload, parameters, nativeBody) {
         removeField(overrides, path);
     }
 
-    if (nativeBody) {
-        output.custom_request_body = overrides;
-        return output;
+    // Also pass known fields in SillyTavern's own format for servers that read them directly.
+    if (isObject(overrides.generationConfig)) {
+        for (const [name, value] of Object.entries(overrides.generationConfig)) {
+            const field = inputFields.get(`generationConfig.${name}`);
+            if (field) output[field] = value;
+        }
     }
-
-    const unknown = firstUnknownField(overrides);
-    if (unknown) throw new Error(`В этой сборке SillyTavern сервер не передаёт поле ${unknown} в запрос Studio или Vertex.`);
-    if (isObject(overrides.generationConfig) && Object.hasOwn(overrides.generationConfig, 'topK') && !overrides.generationConfig.topK) {
-        throw new Error('Штатный сервер SillyTavern пропускает пустой или нулевой topK. Используйте исключение generationConfig.topK.');
-    }
-    for (const [name, value] of Object.entries(overrides.generationConfig ?? {})) {
-        output[inputFields.get(`generationConfig.${name}`)] = value;
-    }
-    delete output.custom_request_body;
+    output.custom_request_body = overrides;
     return output;
 }
