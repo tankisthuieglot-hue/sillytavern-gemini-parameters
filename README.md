@@ -2,29 +2,18 @@
 
 Расширение добавляет кнопку **«Доп. параметры»** под списком моделей в настройках подключения **Google AI Studio** и **Google Vertex AI**. В списках также появляются `gemini-4-hydrogen`, `gemini-4-argon` и `gemini-4-carbon`.
 
-## Установка из GitHub в Termux
+## Установка из GitHub
 
-Ветки `extension` и `server-plugin` готовы для установки через Git. Репозиторий приватный. Войдите в GitHub CLI под аккаунтом с доступом к нему. Этот шаг нужен один раз для Termux.
+1. В SillyTavern откройте **«Расширения» → «Установить расширение»**, вставьте `https://github.com/tankisthuieglot-hue/sillytavern-gemini-parameters.git` и оставьте поле ветки пустым. SillyTavern установит интерфейс из `main`.
+2. Для отправки дополнительных параметров в Google установите серверный плагин по той же ссылке. В папке SillyTavern выполните:
 
-```sh
-pkg install git gh
-gh auth login --hostname github.com --git-protocol https --web
-gh auth setup-git --hostname github.com
-```
+   ```sh
+   node plugins.js install https://github.com/tankisthuieglot-hue/sillytavern-gemini-parameters.git
+   ```
 
-Остановите SillyTavern и выполните:
+3. В корневом `config.yaml` выставьте `enableServerPlugins: true`. Нужна Node.js 22.15+ в ветке 22 или Node.js 24+. Перезапустите SillyTavern и обновите страницу.
 
-```sh
-cd "$HOME/SillyTavern" &&
-repo='https://github.com/tankisthuieglot-hue/sillytavern-gemini-parameters.git' &&
-mkdir -p plugins public/scripts/extensions/third-party &&
-git clone --depth 1 --branch server-plugin "$repo" plugins/gemini-additional-parameters &&
-git clone --depth 1 --branch extension "$repo" public/scripts/extensions/third-party/gemini-additional-parameters
-```
-
-В корневом `config.yaml` выставьте `enableServerPlugins: true`. Нужна Node.js 22.15+ в ветке 22 или Node.js 24+. Запустите SillyTavern и обновите страницу.
-
-Интерфейс также можно установить через **«Расширения» → «Установить расширение»**. После установки серверной части запустите SillyTavern, вставьте `https://github.com/tankisthuieglot-hue/sillytavern-gemini-parameters.git` в поле URL и `extension` в поле ветки. Этот способ заменяет вторую команду `git clone`.
+Меню установки расширений загружает интерфейс. Серверные плагины загружаются из папки `plugins` при запуске. [Установка расширений](https://docs.sillytavern.app/extensions/), [серверные плагины](https://docs.sillytavern.app/for-contributors/server-plugins/)
 
 ## Установка из архива
 

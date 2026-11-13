@@ -1,0 +1,8 @@
+{
+    "display_name": "Gemini — Доп. параметры",
+    "loading_order": 20,
+    "requires": [],
+    "optional": [],
+    "js": "public/scripts/extensions/third-party/gemini-additional-parameters/index.js",
+    "version": "1.0.1"
+}

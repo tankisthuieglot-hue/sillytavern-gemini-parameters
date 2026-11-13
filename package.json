@@ -1,0 +1,6 @@
+{
+    "name": "sillytavern-gemini-parameters",
+    "version": "1.0.1",
+    "type": "module",
+    "main": "server-plugin.mjs"
+}
