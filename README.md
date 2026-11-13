@@ -2,7 +2,31 @@
 
 Расширение добавляет кнопку **«Доп. параметры»** под списком моделей в настройках подключения **Google AI Studio** и **Google Vertex AI**. В списках также появляются `gemini-4-hydrogen`, `gemini-4-argon` и `gemini-4-carbon`.
 
-## Установка
+## Установка из GitHub в Termux
+
+Ветки `extension` и `server-plugin` готовы для установки через Git. Репозиторий приватный. Войдите в GitHub CLI под аккаунтом с доступом к нему. Этот шаг нужен один раз для Termux.
+
+```sh
+pkg install git gh
+gh auth login --hostname github.com --git-protocol https --web
+gh auth setup-git --hostname github.com
+```
+
+Остановите SillyTavern и выполните:
+
+```sh
+cd "$HOME/SillyTavern" &&
+repo='https://github.com/tankisthuieglot-hue/sillytavern-gemini-parameters.git' &&
+mkdir -p plugins public/scripts/extensions/third-party &&
+git clone --depth 1 --branch server-plugin "$repo" plugins/gemini-additional-parameters &&
+git clone --depth 1 --branch extension "$repo" public/scripts/extensions/third-party/gemini-additional-parameters
+```
+
+В корневом `config.yaml` выставьте `enableServerPlugins: true`. Нужна Node.js 22.15+ в ветке 22 или Node.js 24+. Запустите SillyTavern и обновите страницу.
+
+Интерфейс также можно установить через **«Расширения» → «Установить расширение»**. После установки серверной части запустите SillyTavern, вставьте `https://github.com/tankisthuieglot-hue/sillytavern-gemini-parameters.git` в поле URL и `extension` в поле ветки. Этот способ заменяет вторую команду `git clone`.
+
+## Установка из архива
 
 1. Остановите SillyTavern. Скопируйте папки `plugins` и `public` из архива в корень той установки SillyTavern, где хотите использовать расширение. Объедините папки при копировании. В них лежат две новые папки `gemini-additional-parameters`.
 2. В корневом `config.yaml` установите `enableServerPlugins: true`. Серверной части нужна Node.js 22.15+ в ветке 22 или Node.js 24+. Дополнительные пакеты устанавливать не нужно.
