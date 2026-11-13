@@ -1,5 +1,4 @@
-import { mergeBody, parseParameters, requestGemini, requiresDirect } from './gemini-request.js';
-import { setOnlineStatus } from '/script.js';
+import { parseParameters, prepareGeminiRequest } from './gemini-request.js';
 
 const extensionId = 'gemini-additional-parameters';
 const chatPath = '/api/backends/chat-completions';
@@ -9,19 +8,15 @@ const providers = {
     makersuite: { label: 'Google AI Studio', select: '#model_google_select', setting: 'google_model' },
     vertexai: { label: 'Google Vertex AI', select: '#model_vertexai_select', setting: 'vertexai_model' },
 };
+const hydrogenPreset = 'generationConfig:\n  thinkingConfig:\n    thinkingLevel: XHIGH\n    includeThoughts: true';
 const fields = [
-    ['include', 'Добавить в тело запроса', 'generationConfig:\n  thinkingConfig:\n    thinkingLevel: XHIGH\n    includeThoughts: true', 5],
-    ['exclude', 'Исключить из тела запроса', '- generationConfig.thinkingConfig.thinkingBudget\n- generationConfig.temperature', 4],
-    ['headers', 'Добавить заголовки запроса', 'X-Goog-User-Project: "my-project-id"', 3],
+    ['include', 'Добавить в тело запроса', hydrogenPreset, 5],
+    ['exclude', 'Исключить из тела запроса', '- generationConfig.temperature\n- generationConfig.topK', 4],
 ];
 const context = SillyTavern.getContext();
 const { yaml } = SillyTavern.libs;
 const fetchOriginal = globalThis.fetch.bind(globalThis);
-const browserCredentials = new Map();
-const activeSource = () => context.chatCompletionSettings.chat_completion_source;
 const profileKey = (source, model) => JSON.stringify([source, model]);
-const isVertexFull = (source, settings = context.chatCompletionSettings) => source === 'vertexai' && settings.vertexai_auth_mode === 'full';
-const credentialKey = (source, settings) => isVertexFull(source, settings) ? 'vertex-full' : source;
 
 let bodySupport;
 function supportsNativeBodyOverrides() {
@@ -32,14 +27,12 @@ function supportsNativeBodyOverrides() {
 }
 
 function modelSettings(source, model) {
-    return context.extensionSettings[extensionId]?.[profileKey(source, model)];
+    const settings = context.extensionSettings[extensionId];
+    return settings?.[profileKey(source, model)] ?? settings?.[profileKey(source, `models/${model}`)];
 }
 
 async function openParameters(source, model) {
     const nativeBody = await supportsNativeBodyOverrides();
-    const isFull = isVertexFull(source);
-    const connectionKey = credentialKey(source);
-    const savedCredentials = browserCredentials.get(connectionKey);
     const content = document.createElement('div');
     content.className = 'flex-container flexFlowColumn';
     const title = document.createElement('h3');
@@ -68,57 +61,38 @@ async function openParameters(source, model) {
     hint.textContent = 'Формат YAML или JSON. В списке исключений используйте пути через точку.';
     content.append(hint);
 
-    const credentialLabel = document.createElement('label');
-    const credentialInput = document.createElement('input');
-    credentialInput.type = 'password';
-    credentialInput.className = 'text_pole';
-    credentialInput.autocomplete = 'off';
-    credentialInput.spellcheck = false;
-    credentialInput.name = 'gemini-browser-credential';
-    credentialInput.placeholder = savedCredentials ? 'Уже введён для этой вкладки' : 'Вставьте сюда';
-    credentialLabel.append(isFull ? 'Временный OAuth-токен Google Cloud' : 'API-ключ для прямого запроса', credentialInput);
-    content.append(credentialLabel);
+    const support = document.createElement('small');
+    support.textContent = nativeBody
+        ? 'Параметры передаются через сохранённое подключение SillyTavern.'
+        : 'Этот сервер передаёт только штатные параметры Gemini, например maxOutputTokens и temperature. Для XHIGH серверу нужна поддержка дополнительных полей Gemini.';
+    content.append(support);
 
-    const projectInput = document.createElement('input');
-    if (isFull) {
-        const projectLabel = document.createElement('label');
-        projectInput.className = 'text_pole';
-        projectInput.value = savedCredentials?.project ?? '';
-        projectInput.placeholder = 'my-project-id';
-        projectLabel.append('ID проекта Google Cloud', projectInput);
-        content.append(projectLabel);
+    const headersLabel = document.createElement('label');
+    const headers = document.createElement('textarea');
+    headers.className = 'text_pole textarea_compact';
+    headers.name = 'headers';
+    headers.rows = 2;
+    headers.disabled = true;
+    headers.value = saved.headers ?? '';
+    headers.placeholder = 'Штатный сервер Studio / Vertex не принимает дополнительные заголовки';
+    headersLabel.append('Дополнительные заголовки', headers);
+    content.append(headersLabel);
+    if (headers.value.trim()) {
+        const oldHeaders = document.createElement('small');
+        oldHeaders.textContent = 'Заголовки из предыдущей версии сохранены и не отправляются.';
+        content.append(oldHeaders);
     }
 
-    const credentialHint = document.createElement('small');
-    credentialHint.textContent = nativeBody
-        ? 'Для одних добавлений можно использовать сохранённое подключение. Для прямого запроса ключ или токен хранится в памяти вкладки.'
-        : 'Запросы идут из браузера прямо в Google. Ключ или токен хранится в памяти вкладки до её перезагрузки.';
-    content.append(credentialHint);
-
-    if (model === hydrogenModel) {
+    if (model === hydrogenModel && nativeBody) {
         const example = document.createElement('button');
         example.type = 'button';
         example.className = 'menu_button';
         example.textContent = 'Подставить пример Hydrogen XHIGH';
-        example.title = 'Заполняет заново поля добавления и исключения';
+        example.title = 'Заполняет поле добавления';
         example.addEventListener('click', () => {
-            inputs.include.value = fields[0][2];
-            inputs.exclude.value = nativeBody ? '' : [
-                'generationConfig.thinkingConfig.thinkingBudget',
-                'generationConfig.temperature',
-                'generationConfig.topP',
-                'generationConfig.topK',
-            ].map(path => `- ${path}`).join('\n');
+            inputs.include.value = hydrogenPreset;
         });
         content.append(example);
-    }
-
-    if (source === 'vertexai' && geminiModels.includes(model)) {
-        const regionHint = document.createElement('small');
-        regionHint.textContent = isFull
-            ? 'Для Hydrogen укажите регион Vertex AI global, us или eu.'
-            : 'Доступность моделей в Vertex AI Express зависит от списка Google. Для Hydrogen выберите AI Studio или Vertex AI Full.';
-        content.append(regionHint);
     }
 
     const status = document.createElement('div');
@@ -136,48 +110,28 @@ async function openParameters(source, model) {
             if (dialog.result !== context.POPUP_RESULT.AFFIRMATIVE) return true;
 
             const values = Object.fromEntries(Object.entries(inputs).map(([name, input]) => [name, input.value]));
-            const value = credentialInput.value.trim() || savedCredentials?.value;
-            const project = projectInput.value.trim();
+            const hasSavedHeaders = typeof saved.headers === 'string' && Boolean(saved.headers.trim());
             let hasValues;
             try {
                 const parameters = parseParameters(values, yaml.parse);
-                hasValues = Object.keys(parameters.include).length > 0 || requiresDirect(parameters);
-                if (hasValues && (!nativeBody || requiresDirect(parameters)) && !value) {
-                    throw new Error(isFull ? 'Введите временный OAuth-токен Google Cloud.' : 'Введите API-ключ для прямого запроса.');
-                }
-                if (value && !/^[\x21-\x7e]+$/.test(value)) throw new Error('В ключе или токене есть пробелы либо недопустимые символы.');
-                if (value && isFull && !/^[a-z0-9][a-z0-9.:-]{0,126}$/i.test(project)) throw new Error('Укажите ID проекта Google Cloud.');
+                hasValues = Object.keys(parameters.include).length > 0 || parameters.excludePaths.length > 0;
+                if (hasValues) prepareGeminiRequest({ model }, parameters, nativeBody);
             } catch (error) {
                 status.textContent = error.message;
                 status.hidden = false;
                 return false;
             }
 
-            credentialInput.value = '';
-            if (value) browserCredentials.set(connectionKey, { value, project });
             const settings = context.extensionSettings[extensionId] ??= {};
             const key = profileKey(source, model);
-            if (hasValues) settings[key] = values;
+            if (hasValues || hasSavedHeaders) settings[key] = { ...values, ...(hasSavedHeaders ? { headers: saved.headers } : {}) };
             else delete settings[key];
+            delete settings[profileKey(source, `models/${model}`)];
             context.saveSettingsDebounced();
-            updateBrowserStatus();
             return true;
         },
     });
     await popup.show();
-}
-
-const browserStatus = 'Gemini: прямое подключение из браузера';
-function updateBrowserStatus() {
-    const current = SillyTavern.getContext();
-    const source = activeSource();
-    const provider = Object.hasOwn(providers, source) ? providers[source] : null;
-    const model = current.chatCompletionSettings[provider?.setting];
-    if (current.mainApi === 'openai' && provider && browserCredentials.has(credentialKey(source)) && modelSettings(source, model)) {
-        if (current.onlineStatus === 'no_connection') setOnlineStatus(browserStatus);
-    } else if (current.onlineStatus === browserStatus) {
-        setOnlineStatus('no_connection');
-    }
 }
 
 for (const [source, provider] of Object.entries(providers)) {
@@ -199,18 +153,13 @@ for (const [source, provider] of Object.entries(providers)) {
     button.className = 'menu_button menu_button_icon';
     button.textContent = 'Доп. параметры';
     button.addEventListener('click', () => {
-        if (select.value) void openParameters(source, select.value);
+        if (select.value) void openParameters(source, select.value.replace(/^models\//, ''));
     });
     select.after(button);
 }
 
-for (const type of ['CHATCOMPLETION_SOURCE_CHANGED', 'CHATCOMPLETION_MODEL_CHANGED', 'MAIN_API_CHANGED', 'ONLINE_STATUS_CHANGED', 'OAI_PRESET_CHANGED_AFTER']) {
-    if (context.eventTypes[type]) context.eventSource.on(context.eventTypes[type], updateBrowserStatus);
-}
-document.querySelector('#vertexai_auth_mode')?.addEventListener('change', () => queueMicrotask(updateBrowserStatus));
-
 // The main chat, Test Message and ChatCompletionService all use this endpoint.
-globalThis.fetch = async function fetchWithGeminiParameters(resource, options) {
+globalThis.fetch = function fetchWithGeminiParameters(resource, options) {
     if ((typeof resource !== 'string' && !(resource instanceof URL)) ||
         typeof options?.body !== 'string' || String(options.method).toUpperCase() !== 'POST') {
         return fetchOriginal(resource, options);
@@ -233,42 +182,18 @@ globalThis.fetch = async function fetchWithGeminiParameters(resource, options) {
     }
     const source = payload?.chat_completion_source;
     if (!Object.hasOwn(providers, source) || typeof payload.model !== 'string') return fetchOriginal(resource, options);
-    const settings = modelSettings(source, payload.model);
+    const settings = modelSettings(source, payload.model.replace(/^models\//, ''));
     if (!settings) return fetchOriginal(resource, options);
-    const connection = { ...context.chatCompletionSettings, ...payload };
-    const credentials = browserCredentials.get(credentialKey(source, connection));
 
-    try {
-        const parameters = parseParameters(settings, yaml.parse);
-        if (payload.custom_request_body !== undefined && (!payload.custom_request_body || typeof payload.custom_request_body !== 'object' || Array.isArray(payload.custom_request_body))) {
-            throw new Error('Другое расширение передало некорректное дополнительное тело запроса.');
+    return supportsNativeBodyOverrides().then(nativeBody => {
+        let body;
+        try {
+            const parameters = parseParameters(settings, yaml.parse);
+            if (!Object.keys(parameters.include).length && !parameters.excludePaths.length) return fetchOriginal(resource, options);
+            body = JSON.stringify(prepareGeminiRequest(payload, parameters, nativeBody));
+        } catch (error) {
+            return Response.json({ error: { message: error.message } }, { status: 400 });
         }
-        if (!credentials && !requiresDirect(parameters) && await supportsNativeBodyOverrides()) {
-            const model = payload.model.replace(/^models\//, '');
-            const thinking = payload.include_reasoning && /^gemini-4(?:[.-]|$)/.test(model)
-                ? { generationConfig: { thinkingConfig: { includeThoughts: true } } } : {};
-            const custom_request_body = mergeBody(mergeBody(thinking, payload.custom_request_body ?? {}), parameters.include);
-            const body = JSON.stringify({ ...payload, custom_request_body });
-            return fetchOriginal(resource, { ...options, body });
-        }
-        if (!credentials) {
-            const message = isVertexFull(source, connection) ? 'Введите временный OAuth-токен в «Доп. параметры».' : 'Введите API-ключ в «Доп. параметры».';
-            return Response.json({ error: { message } }, { status: 400 });
-        }
-        if (payload.custom_prompt_post_processing && Array.isArray(payload.messages)) {
-            const response = await fetchOriginal(`${chatPath}/process`, {
-                method: 'POST', headers: context.getRequestHeaders(), signal: options.signal,
-                body: JSON.stringify({
-                    type: payload.custom_prompt_post_processing, messages: payload.messages,
-                    user_name: payload.user_name, char_name: payload.char_name, group_names: payload.group_names,
-                }),
-            });
-            if (response.ok) connection.messages = (await response.json()).messages;
-            else if (response.status !== 404) throw new Error('SillyTavern не смог обработать сообщения для Gemini.');
-        }
-        return await requestGemini(connection, parameters, credentials, options.signal, fetchOriginal);
-    } catch (error) {
-        if (options.signal?.aborted || error.name === 'AbortError') throw error;
-        return Response.json({ error: { message: error.message } }, { status: 400 });
-    }
+        return fetchOriginal(resource, { ...options, body });
+    });
 };
