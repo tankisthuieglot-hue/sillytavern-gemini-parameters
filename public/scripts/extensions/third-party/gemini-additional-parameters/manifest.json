@@ -1,8 +1,0 @@
-{
-    "display_name": "Gemini — Доп. параметры",
-    "loading_order": 20,
-    "requires": [],
-    "optional": [],
-    "js": "index.js",
-    "version": "1.0.1"
-}
